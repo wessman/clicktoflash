@@ -37,15 +37,12 @@ static NSString *sFlashNewMIMEType = @"application/futuresplash";
 
     // NSUserDefaults keys
 static NSString *sHostWhitelistDefaultsKey = @"ClickToFlash_whitelist";
-#if DE_SIFR == 0
-static NSString *sAllowSifrDefaultsKey = @"ClickToFlash_allowSifr";
-#endif
 static NSString *sUseYouTubeH264DefaultsKey = @"ClickToFlash_useYouTubeH264";
 
     // NSNotification names
 static NSString *sCTFWhitelistAdditionMade = @"CTFWhitelistAdditionMade";
 
-#if DE_SIFR
+static NSString *sSifrSupportDefaultsKey = @"ClickToFlash_sifrSupport";
 static NSString *sSifrModeDefaultsKey = @"ClickToFlash_sifrMode";
 static NSString *sSifr2Test		= @"sIFR != null && typeof sIFR == \"function\"";
 static NSString *sSifr3Test		= @"sIFR != null && typeof sIFR == \"object\"";
@@ -56,11 +53,9 @@ static NSString *sSifr3AddOnJSFilename = @"sifr3-addons";
 
 typedef enum
 {
-	CTFSifrModeDoNothing	= 0, 
 	CTFSifrModeAllowSifr	= 1, 
 	CTFSifrModeDeSifr		= 2
 } CTFSifrMode;
-#endif
 
 @interface CTFClickToFlashPlugin (Internal)
 - (void) _convertTypesForFlashContainer;
@@ -83,10 +78,8 @@ typedef enum
 - (void) _convertToMP4Container;
 - (NSDictionary*) _flashVarDictionary: (NSString*) flashvarString;
 
-#if DE_SIFR
 - (NSUInteger) _sifrVersionInstalled;
 - (void) _disableSIFR;
-#endif
 
 @end
 
@@ -132,12 +125,10 @@ typedef enum
 		// get defaults
 		NSUserDefaults *userDefaults = [NSUserDefaults standardUserDefaults];
 		
-#if DE_SIFR
 		// out-of-the-box, ignore sIFR
-		NSDictionary *baseDefaults = [NSDictionary dictionaryWithObject:[NSNumber numberWithInt:CTFSifrModeDoNothing] forKey:sSifrModeDefaultsKey];
-		
+		NSDictionary *baseDefaults = [NSDictionary dictionaryWithObject:[NSNumber numberWithBool:false] forKey:sSifrSupportDefaultsKey];
+
 		self.webView = [[[arguments objectForKey:WebPlugInContainerKey] webFrame] webView];
-#endif
 		
         self.container = [arguments objectForKey:WebPlugInContainingElementKey];
         
@@ -160,18 +151,13 @@ typedef enum
         
         NSString* sifrKey = [[arguments objectForKey: WebPlugInAttributesKey] objectForKey: @"sifr"];
         if( sifrKey && [ sifrKey boolValue ] ) {
-#if DE_SIFR
-			if([userDefaults integerForKey: sSifrModeDefaultsKey] == CTFSifrModeAllowSifr)
-#else
-            if([userDefaults boolForKey: sAllowSifrDefaultsKey])
-#endif
+			if([userDefaults boolForKey:sSifrSupportDefaultsKey] && [userDefaults integerForKey: sSifrModeDefaultsKey] == CTFSifrModeAllowSifr)
                 loadFromWhiteList = true;
             else
                 _isSifr = true;
         }
 		
-#if DE_SIFR
-		if( !loadFromWhiteList && _isSifr && [userDefaults integerForKey: sSifrModeDefaultsKey] == CTFSifrModeDeSifr )
+		if( !loadFromWhiteList && _isSifr && [userDefaults boolForKey:sSifrSupportDefaultsKey] && [userDefaults integerForKey: sSifrModeDefaultsKey] == CTFSifrModeDeSifr )
 		{
 			_sifrVersion = [self _sifrVersionInstalled];
 			
@@ -180,7 +166,6 @@ typedef enum
 				[self performSelector:@selector(_disableSIFR) withObject:nil afterDelay:0];
 			}
 		}
-#endif
         
         // Read in flashvars (needed to determine YouTube videos)
         
@@ -264,12 +249,14 @@ typedef enum
     
     self.container = nil;
     self.host = nil;
-#if DE_SIFR
 	self.webView = nil;
-#endif
     [_flashVars release];
     [[NSNotificationCenter defaultCenter] removeObserver: self];
-
+	
+#if LOGGING_ENABLED
+	NSLog(@"ClickToFlash:\tdealloc");
+#endif
+	
     [super dealloc];
 }
 
@@ -780,7 +767,6 @@ typedef enum
     self.container = nil;
 }
 
-#if DE_SIFR
 #pragma mark -
 #pragma mark deSIFR methods
 
@@ -834,8 +820,6 @@ typedef enum
 
 
 @synthesize webView = _webView;
-#endif
-
 @synthesize container = _container;
 @synthesize host = _host;
 
