@@ -34,13 +34,14 @@ THE SOFTWARE.
     NSDictionary* _flashVars;
     NSTrackingArea *trackingArea;
     NSAlert* _activeAlert;
+    NSString* _badgeText;
     BOOL mouseIsDown;
     BOOL mouseInside;
     BOOL _isLoadingFromWhitelist;
-    BOOL _isSifr;
     BOOL _fromYouTube;
 	WebView *_webView;
 	NSUInteger _sifrVersion;
+	NSString *_baseURL;
 }
 
 + (NSView *)plugInViewWithArguments:(NSDictionary *)arguments;
@@ -50,13 +51,14 @@ THE SOFTWARE.
 @property (nonatomic, retain) DOMElement *container;
 @property (nonatomic, retain) NSString *host;
 @property (nonatomic, retain) WebView *webView;
-@property (readonly, nonatomic, retain) NSString *addToWhiteListMenuTitle;
+@property (retain) NSString *baseURL;
 
-- (IBAction)addToWhitelist:(id)sender;
-- (IBAction)removeFromWhitelist:(id)sender;
-- (IBAction)editWhitelist:(id)sender;
 - (IBAction)loadFlash:(id)sender;
 - (IBAction)loadH264:(id)sender;
 - (IBAction)loadAllOnPage:(id)sender;
+
+- (BOOL) isConsideredInvisible;
+
+- (void) _convertTypesForContainer;
 
 @end

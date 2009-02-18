@@ -25,8 +25,13 @@ THE SOFTWARE.
 */
 
 #import "Plugin.h"
-#import "NSBezierPath-RoundedRectangle.h"
+
 #import "CTFMenubarMenuController.h"
+#import "CTFsIFRSupport.h"
+#import "CTFUtilities.h"
+#import "CTFWhitelist.h"
+#import "NSBezierPath-RoundedRectangle.h"
+
 
 #define LOGGING_ENABLED 0
 
@@ -36,51 +41,29 @@ static NSString *sFlashOldMIMEType = @"application/x-shockwave-flash";
 static NSString *sFlashNewMIMEType = @"application/futuresplash";
 
     // NSUserDefaults keys
-       NSString *sHostWhitelistDefaultsKey = @"ClickToFlash_whitelist";
-static NSString *sAllowSifrDefaultsKey = @"ClickToFlash_allowSifr";
 static NSString *sUseYouTubeH264DefaultsKey = @"ClickToFlash_useYouTubeH264";
+static NSString *sAutoLoadInvisibleFlashViewsKey = @"ClickToFlash_autoLoadInvisibleViews";
 
-    // NSNotification names
-	   NSString *sCTFWhitelistAdditionMade = @"CTFWhitelistAdditionMade";
-
-static NSString *sSifrModeDefaultsKey = @"ClickToFlash_sifrMode";
-static NSString *sSifr2Test		= @"sIFR != null && typeof sIFR == \"function\"";
-static NSString *sSifr3Test		= @"sIFR != null && typeof sIFR == \"object\"";
-static NSString *sSifrAddOnTest	= @"sIFR.rollback == null || typeof sIFR.rollback != \"function\"";
-static NSString *sSifrRollbackJS	= @"sIFR.rollback()";
-static NSString *sSifr2AddOnJSFilename = @"sifr2-addons";
-static NSString *sSifr3AddOnJSFilename = @"sifr3-addons";
-
-typedef enum
-{
-	CTFSifrModeDoNothing	= 0, 
-	CTFSifrModeAllowSifr	= 1, 
-	CTFSifrModeDeSifr		= 2
-} CTFSifrMode;
 
 @interface CTFClickToFlashPlugin (Internal)
 - (void) _convertTypesForFlashContainer;
-- (void) _convertTypesForContainer;
+- (void) _convertToMP4Container;
 - (void) _replaceSelfWithElement: (DOMElement*) newElement;
+
 - (void) _drawBackground;
 - (BOOL) _isOptionPressed;
-- (BOOL) _isHostWhitelisted;
-- (NSMutableArray *)_hostWhitelist;
-- (void) _alertDone;
-- (void) _abortAlert;
-- (void) _addHostToWhitelist;
-- (void) _removeHostFromWhitelist;
-- (void) _askToAddCurrentSiteToWhitelist;
-- (void) _whitelistAdditionMade: (NSNotification*) notification;
+
 - (void) _loadContent: (NSNotification*) notification;
 - (void) _loadContentForWindow: (NSNotification*) notification;
+
+- (NSDictionary*) _flashVarDictionary: (NSString*) flashvarString;
 - (BOOL) _hasH264Version;
 - (BOOL) _useH264Version;
-- (void) _convertToMP4Container;
-- (NSDictionary*) _flashVarDictionary: (NSString*) flashvarString;
-- (NSUInteger) _sifrVersionInstalled;
-- (void) _disableSIFR;
 @end
+
+
+#pragma mark -
+#pragma mark Whitelist Utility Functions
 
 
 @implementation CTFClickToFlashPlugin
@@ -98,24 +81,6 @@ typedef enum
 #pragma mark -
 #pragma mark Initialization and Superclass Overrides
 
-- (void) _migrateWhitelist
-{
-    // Migrate from the old location to the new location.  We'll leave
-    // this in for a couple builds (being added for 1.4) and then remove
-    // it assuming those who care would have upgraded.
-    
-    NSUserDefaults* defaults = [ NSUserDefaults standardUserDefaults ];
-    
-    id oldWhitelist = [ defaults objectForKey: @"ClickToFlash.whitelist" ];
-    if( oldWhitelist ) {
-        id newWhitelist = [ defaults objectForKey: sHostWhitelistDefaultsKey ];
-        
-        if( newWhitelist == nil ) {
-            [ defaults setObject: oldWhitelist forKey: sHostWhitelistDefaultsKey ];
-            [ defaults removeObjectForKey: @"ClickToFlash.whitelist"];
-        }
-    }
-}
 
 - (id) initWithArguments:(NSDictionary *)arguments
 {
@@ -123,9 +88,6 @@ typedef enum
     if (self) {
 		// get defaults
 		NSUserDefaults *userDefaults = [NSUserDefaults standardUserDefaults];
-		
-		// out-of-the-box, ignore sIFR
-		NSDictionary *baseDefaults = [NSDictionary dictionaryWithObject:[NSNumber numberWithInt:CTFSifrModeDoNothing] forKey:sSifrModeDefaultsKey];
 		
 		self.webView = [[[arguments objectForKey:WebPlugInContainerKey] webFrame] webView];
 		
@@ -138,6 +100,7 @@ typedef enum
         // Get URL and test against the whitelist
         
         NSURL *base = [arguments objectForKey:WebPlugInBaseURLKey];
+		[self setBaseURL:[base absoluteString]];
         if (base) {
             self.host = [base host];
 
@@ -145,27 +108,18 @@ typedef enum
                 loadFromWhiteList = true;
             }
         }
+
         
-        // Check for sIFR - http://www.mikeindustries.com/sifr/
+        // Check for sIFR
         
-        NSString* classValue = [[arguments objectForKey: WebPlugInAttributesKey] objectForKey: @"class"];
-        NSString* sifrValue = [[arguments objectForKey: WebPlugInAttributesKey] objectForKey: @"sifr"];
-        if ([classValue isEqualToString: @"sIFR-flash"] || (sifrValue && [sifrValue boolValue])) {
-			if([userDefaults integerForKey: sSifrModeDefaultsKey] == CTFSifrModeAllowSifr)
+        if ([self _isSIFRText: arguments]) {
+            _badgeText = NSLocalizedString(@"sIFR Flash", @"sIFR Flash badge text");
+            
+            if ([self _shouldAutoLoadSIFR])
                 loadFromWhiteList = true;
-            else
-                _isSifr = true;
+            else if ([self _shouldDeSIFR])
+                [self performSelector:@selector(_disableSIFR) withObject:nil afterDelay:0];
         }
-		
-		if( !loadFromWhiteList && _isSifr && [userDefaults integerForKey: sSifrModeDefaultsKey] == CTFSifrModeDeSifr )
-		{
-			_sifrVersion = [self _sifrVersionInstalled];
-			
-			if( _sifrVersion != 0 )
-			{
-				[self performSelector:@selector(_disableSIFR) withObject:nil afterDelay:0];
-			}
-		}
         
         // Read in flashvars (needed to determine YouTube videos)
         
@@ -188,19 +142,6 @@ typedef enum
             [self performSelector:@selector(_convertTypesForContainer) withObject:nil afterDelay:0];
         }
         
-        // Set up contextual menu
-        
-        if (![NSBundle loadNibNamed:@"ContextualMenu" owner:self])
-            NSLog(@"Could not load contextual menu plugin");
-            // NOTE [tgaul]: we could save memory by not loading the context menu until it was
-            // needed by overriding menuForEvent and returning it there.
-        
-        if ([self _hasH264Version]) {
-            [[self menu] insertItemWithTitle: NSLocalizedString( @"Load H.264", "Load H.264 context menu item" )
-                                      action: @selector( loadH264: ) keyEquivalent: @"" atIndex: 1];
-            [[[self menu] itemAtIndex: 1] setTarget: self];
-        }
-        
         // Set up main menus
         
 		[ CTFMenubarMenuController sharedController ];	// trigger the menu items to be added
@@ -208,8 +149,9 @@ typedef enum
         // Set tooltip
         
         NSDictionary *attributes = [arguments objectForKey:WebPlugInAttributesKey];
+		NSString *src = nil;
         if (attributes != nil) {
-            NSString *src = [attributes objectForKey:@"src"];
+            src = [attributes objectForKey:@"src"];
             if (src)
                 [self setToolTip:src];
             else {
@@ -218,16 +160,24 @@ typedef enum
                     [self setToolTip:src];
             }
         }
+		
+		// send a notification so that all flash objects can be tracked
+		
+		if ( [ [ NSUserDefaults standardUserDefaults ] boolForKey: sAutoLoadInvisibleFlashViewsKey ]
+				&& [ self isConsideredInvisible ] ) {
+			// auto-loading is on and this view meets the size constraints
+			[self _convertTypesForContainer];
+		} else {
+			// we only want to track it if we don't auto-load it
+			[[CTFMenubarMenuController sharedController] registerView: self];
+		}
         
         // Observe various things:
         
         NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
         
-            // Observe for additions to the whitelist (can't use KVO due to the dot in the pref key):
-        [center addObserver: self 
-                   selector: @selector( _whitelistAdditionMade: ) 
-                       name: sCTFWhitelistAdditionMade 
-                     object: nil ];
+            // Observe for additions to the whitelist:
+        [self _addWhitelistObserver];
 		
 		[center addObserver: self 
 				   selector: @selector( _loadContent: ) 
@@ -238,6 +188,11 @@ typedef enum
 				   selector: @selector( _loadContentForWindow: ) 
 					   name: kCTFLoadFlashViewsForWindow 
 					 object: nil ];
+		
+		[center addObserver: self 
+				   selector: @selector( _loadInvisibleContentForWindow: ) 
+					   name: kCTFLoadInvisibleFlashViewsForWindow
+					 object: nil ];
     }
 
     return self;
@@ -246,11 +201,17 @@ typedef enum
 - (void) dealloc
 {
     [self _abortAlert];        // to be on the safe side
+	
+	// notify that this ClickToFlash plugin is going away
+	[[CTFMenubarMenuController sharedController] unregisterView: self];
     
     self.container = nil;
     self.host = nil;
 	self.webView = nil;
+    
     [_flashVars release];
+    [_badgeText release];
+    
     [[NSNotificationCenter defaultCenter] removeObserver: self];
 
 #if LOGGING_ENABLED
@@ -260,13 +221,11 @@ typedef enum
     [super dealloc];
 }
 
-
 - (void) drawRect:(NSRect)rect
 {
 	if(!_isLoadingFromWhitelist)
 		[self _drawBackground];
 }
-
 
 - (void) mouseDown:(NSEvent *)event
 {
@@ -282,12 +241,12 @@ typedef enum
     [self addTrackingArea:trackingArea];
 }
 
-- (void)mouseEntered:(NSEvent *)event
+- (void) mouseEntered:(NSEvent *)event
 {
     mouseInside = YES;
     [self setNeedsDisplay:YES];
 }
-- (void)mouseExited:(NSEvent *)event
+- (void) mouseExited:(NSEvent *)event
 {
     mouseInside = NO;
     [self setNeedsDisplay:YES];
@@ -313,104 +272,55 @@ typedef enum
     }
 }
 
-- (BOOL) _isOptionPressed;
+- (BOOL) _isOptionPressed
 {
     BOOL isOptionPressed = (([[NSApp currentEvent] modifierFlags] & NSAlternateKeyMask) != 0);
     return isOptionPressed;
 }
 
-- (void) _alertDone
+- (BOOL) isConsideredInvisible
 {
-	[ _activeAlert release ];
-	_activeAlert = nil;
-}
-
-- (void) _abortAlert
-{
-	if( _activeAlert ) {
-		[ NSApp endSheet: [ _activeAlert window ] returnCode: NSAlertSecondButtonReturn ];
-		[ self _alertDone ];
-	}
-}
-
-- (void) _askToAddCurrentSiteToWhitelist
-{
-    NSString *title = NSLocalizedString(@"Always load Flash for this site?", @"Always load Flash for this site? alert title");
-    NSString *message = [NSString stringWithFormat:NSLocalizedString(@"Add %@ to the whitelist?", @"Add <sitename> to the whitelist? alert message"), self.host];
-    
-    NSAlert *alert = [[NSAlert alloc] init];
-    [alert addButtonWithTitle:NSLocalizedString(@"Add to Whitelist", @"Add to Whitelist button")];
-    [alert addButtonWithTitle:NSLocalizedString(@"Cancel", @"Cancel button")];
-    [alert setMessageText:title];
-    [alert setInformativeText:message];
-    [alert setAlertStyle:NSInformationalAlertStyle];
-    [alert beginSheetModalForWindow:[self window]
-                      modalDelegate:self
-                     didEndSelector:@selector(addToWhitelistAlertDidEnd:returnCode:contextInfo:)
-                        contextInfo:nil];
-    _activeAlert = alert;
-}
-
-- (void)addToWhitelistAlertDidEnd:(NSAlert *)alert returnCode:(int)returnCode contextInfo:(void *)contextInfo
-{
-    if (returnCode == NSAlertFirstButtonReturn)
-    {
-        [self _addHostToWhitelist];
-    }
-
-    [ self _alertDone ];
-}
-
-- (BOOL) _isHostWhitelisted
-{
-    NSArray *hostWhitelist = [[NSUserDefaults standardUserDefaults] stringArrayForKey:sHostWhitelistDefaultsKey];
-    return hostWhitelist && [hostWhitelist containsObject:self.host];
-}
-
-- (NSMutableArray *)_hostWhitelist
-{
-    NSMutableArray *hostWhitelist = [[[[NSUserDefaults standardUserDefaults] stringArrayForKey:sHostWhitelistDefaultsKey] mutableCopy] autorelease];
-    if (hostWhitelist == nil) {
-        hostWhitelist = [NSMutableArray array];
-    }
-    return hostWhitelist;
-}
-
-- (void) _addHostToWhitelist
-{
-    NSMutableArray *hostWhitelist = [self _hostWhitelist];
-    [hostWhitelist addObject:self.host];
-    [[NSUserDefaults standardUserDefaults] setObject:hostWhitelist forKey:sHostWhitelistDefaultsKey];
-    [[NSNotificationCenter defaultCenter] postNotificationName: sCTFWhitelistAdditionMade object: self];
-}
-
-- (void) _removeHostFromWhitelist
-{
-    NSMutableArray *hostWhitelist = [self _hostWhitelist];
-    [hostWhitelist removeObject:self.host];
-    [[NSUserDefaults standardUserDefaults] setObject:hostWhitelist forKey:sHostWhitelistDefaultsKey];
-}
-
-- (void) _whitelistAdditionMade: (NSNotification*) notification
-{
-	if ([self _isHostWhitelisted])
-		[self _convertTypesForContainer];
+	DOMElement* clonedElement = (DOMElement*) [ self.container cloneNode: NO ];
+	
+	int height = [[clonedElement getAttribute:@"height"] intValue];
+	int width = [[clonedElement getAttribute:@"width"] intValue];
+	
+	return (height <= maxInvisibleDimension) && (width <= maxInvisibleDimension);
 }
 
 #pragma mark -
 #pragma mark Contextual menu
 
-- (NSString*) addToWhiteListMenuTitle
+- (NSMenu*) menuForEvent: (NSEvent*) event
 {
-    return [NSString stringWithFormat:NSLocalizedString(@"Add %@ to Whitelist", @"Add <sitename> to Whitelist menu title"), self.host];
+    // Set up contextual menu
+    
+    if( ![ self menu ] ) {
+        if (![NSBundle loadNibNamed:@"ContextualMenu" owner:self]) {
+            NSLog(@"Could not load contextual menu plugin");
+        }
+        else {
+            if ([self _hasH264Version]) {
+                [[self menu] insertItemWithTitle: NSLocalizedString( @"Load H.264", "Load H.264 context menu item" )
+                                          action: @selector( loadH264: ) keyEquivalent: @"" atIndex: 1];
+                [[[self menu] itemAtIndex: 1] setTarget: self];
+            }
+        }
+    }
+    
+    return [self menu];
 }
 
-- (BOOL)validateMenuItem:(NSMenuItem *)menuItem
+- (BOOL) validateMenuItem: (NSMenuItem *)menuItem
 {
     BOOL enabled = YES;
     SEL action = [menuItem action];
     if (action == @selector(addToWhitelist:))
     {
+        NSString* title = [NSString stringWithFormat:
+                NSLocalizedString(@"Add %@ to Whitelist", @"Add <sitename> to Whitelist menu title"), 
+                self.host];
+        [menuItem setTitle: title];
         if ([self _isHostWhitelisted])
             enabled = NO;
     }
@@ -423,49 +333,8 @@ typedef enum
     return enabled;
 }
 
-- (IBAction)addToWhitelist:(id)sender;
-{
-    if ([self _isHostWhitelisted])
-        return;
-    
-    [self _addHostToWhitelist];
-}
-
-- (IBAction)removeFromWhitelist:(id)sender;
-{
-    if (![self _isHostWhitelisted])
-        return;
-    
-    NSString *title = NSLocalizedString(@"Stop always loading Flash?", @"Stop always loading Flash? alert title");
-    NSString *message = [NSString stringWithFormat:NSLocalizedString(@"Remove %@ from the whitelist?", @"Remove %@ from the whitelist? alert message"), self.host];
-    
-    NSAlert *alert = [[NSAlert alloc] init];
-    [alert addButtonWithTitle:NSLocalizedString(@"Remove from Whitelist", @"Remove from Whitelist button")];
-    [alert addButtonWithTitle:NSLocalizedString(@"Cancel", @"Cancel button")];
-    [alert setMessageText:title];
-    [alert setInformativeText:message];
-    [alert setAlertStyle:NSInformationalAlertStyle];
-    [alert beginSheetModalForWindow:[self window]
-                      modalDelegate:self
-                     didEndSelector:@selector(removeFromWhitelistAlertDidEnd:returnCode:contextInfo:)
-                        contextInfo:nil];
-    _activeAlert = alert;
-}
-
-- (void)removeFromWhitelistAlertDidEnd:(NSAlert *)alert returnCode:(int)returnCode contextInfo:(void *)contextInfo
-{
-    if (returnCode == NSAlertFirstButtonReturn)
-    {
-        [self _removeHostFromWhitelist];
-    }
-    
-    [ self _alertDone ];
-}
-
-- (IBAction)editWhitelist:(id)sender;
-{
-	[ [ CTFMenubarMenuController sharedController ] showSettingsWindow: self ];
-}
+#pragma mark -
+#pragma mark Loading
 
 - (IBAction)loadFlash:(id)sender;
 {
@@ -493,6 +362,13 @@ typedef enum
 		[ self _convertTypesForContainer ];
 }
 
+- (void) _loadInvisibleContentForWindow: (NSNotification*) notification
+{
+	if( [ notification object ] == [ self window ] && [ self isConsideredInvisible ] ) {
+		[ self _convertTypesForContainer ];
+	}
+}
+
 #pragma mark -
 #pragma mark Drawing
 
@@ -502,8 +378,8 @@ typedef enum
         return NSLocalizedString( @"H.264", @"H.264 badge text" );
     else if( [ self _hasH264Version ] )
         return NSLocalizedString( @"YouTube", @"YouTube badge text" );
-    else if( _isSifr )
-        return NSLocalizedString( @"sIFR Flash", @"sIFR Flash badge text" );
+    else if( _badgeText )
+        return _badgeText;
     else
         return NSLocalizedString( @"Flash", @"Flash badge text" );
 }
@@ -563,7 +439,7 @@ typedef enum
 
 		maxH = kMinHeight;
 	}
-
+	
 	float scaleFactor = 1.0;
 	
 	if( maxW < w )
@@ -649,9 +525,7 @@ typedef enum
     
     NSArray* args = [ flashvarString componentsSeparatedByString: @"&" ];
     
-    NSEnumerator* objEnum = [ args objectEnumerator ];
-    NSString* oneArg;
-    while( oneArg = [ objEnum nextObject ] ) {
+    CTFForEachObject( NSString, oneArg, args ) {
         NSRange sepRange = [ oneArg rangeOfString: @"=" ];
         if( sepRange.location != NSNotFound ) {
             NSString* key = [ oneArg substringToIndex: sepRange.location ];
@@ -740,6 +614,9 @@ typedef enum
 
 - (void) _convertTypesForContainer
 {
+	// notify that this ClickToFlash plugin is going away
+	[[CTFMenubarMenuController sharedController] unregisterView: self];
+	
     if ([self _useH264Version])
         [self _convertToMP4Container];
     else
@@ -779,59 +656,9 @@ typedef enum
     self.container = nil;
 }
 
-#pragma mark -
-#pragma mark deSIFR methods
-
-- (NSUInteger) _sifrVersionInstalled
-{	
-	// get the container's WebView
-	WebView *sifrWebView = self.webView;
-	NSUInteger version = 0;
-
-	if( sifrWebView )
-	{		
-		if( [[sifrWebView stringByEvaluatingJavaScriptFromString:sSifr2Test] isEqualToString:@"true"] )				// test for sIFR v.2
-		{
-			version = 2;
-		} else if( [[sifrWebView stringByEvaluatingJavaScriptFromString:sSifr3Test] isEqualToString:@"true"] )	{	// test for sIFR v.3
-			version = 3;
-		}
-	}
-	
-	return version;
-}
-
-- (void) _disableSIFR
-{	
-	// get the container's WebView
-	WebView *sifrWebView = self.webView;
-	
-	// if sifr add-ons are not installed, load version-appropriate version into page
-	if( [[sifrWebView stringByEvaluatingJavaScriptFromString:sSifrAddOnTest] isEqualToString:@"true"] )
-	{		
-		NSBundle *clickBundle = [NSBundle bundleForClass:[self class]];
-		
-		NSString *jsFileName = ( _sifrVersion == 2 ? sSifr2AddOnJSFilename : sSifr3AddOnJSFilename );
-		
-		NSString *addOnPath = [clickBundle pathForResource:jsFileName ofType:@"js"];
-		
-		if( addOnPath )
-		{
-			NSString *sifrAddOnJS = [NSString stringWithContentsOfFile:addOnPath];
-			
-			if( sifrAddOnJS && !([sifrAddOnJS isEqualToString:@""]) )
-			{
-				[[sifrWebView windowScriptObject] evaluateWebScript:sifrAddOnJS];
-			}
-		}
-	}
-	
-	// implement rollback
-	[[sifrWebView windowScriptObject] evaluateWebScript:sSifrRollbackJS];
-}
-
 @synthesize webView = _webView;
 @synthesize container = _container;
 @synthesize host = _host;
+@synthesize baseURL = _baseURL;
 
 @end

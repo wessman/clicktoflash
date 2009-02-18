@@ -25,76 +25,70 @@ THE SOFTWARE.
 */
 
 #import "CTFMenubarMenuController.h"
-
 #import "CTFWhitelistWindowController.h"
 
+#import "Plugin.h"
 
 NSString* kCTFLoadAllFlashViews = @"CTFLoadAllFlashViews";
 NSString* kCTFLoadFlashViewsForWindow = @"CTFLoadFlashViewsForWindow";
+NSString* kCTFLoadInvisibleFlashViewsForWindow = @"CTFLoadInvisibleFlashViewsForWindow";
 
-static CTFMenubarMenuController* sSingleton = nil;
+NSUInteger maxInvisibleDimension = 8;
+
+
+static NSString* kApplicationsToInstallMenuInto[] = {
+    @"com.apple.Safari",
+    nil
+};
+
+
+static NSMenu* appMenu()
+{
+    return [ [ [ NSApp mainMenu ] itemAtIndex: 0 ] submenu ];
+}
 
 
 @implementation CTFMenubarMenuController
 
 
 #pragma mark -
-#pragma mark Lifetime management
+#pragma mark Main menu item setup
 
 
-- (id) init
+- (BOOL) shouldLoadMainMenuItemIntoCurrentProcess
 {
-	if( sSingleton ) {
-		[ self release ];
-		return sSingleton;
-	}
-
-	self = [ super init ];
-		
-	sSingleton = self;
-	
-	if( self ) {
-		if( ! [ NSBundle loadNibNamed: @"MenubarMenu" owner: self ] )
-			NSLog( @"ClickToFlash: Could not load menubar menu nib" );
-	}
-	
-	return self;
+    NSBundle* appBundle = [ NSBundle mainBundle ];
+    NSString* currentAppId = [ appBundle bundleIdentifier ];
+    
+    if( [ appBundle objectForInfoDictionaryKey: @"ClickToFlashPrefsAppMenuItemIndex" ] != nil )
+        return YES;
+    
+    int i;
+    NSString* appId = kApplicationsToInstallMenuInto[ 0 ];
+    for( i = 0 ; appId != nil ; appId = kApplicationsToInstallMenuInto[ ++i ] ) {
+        if( [ appId isEqualToString: currentAppId ] )
+            return YES;
+    }
+    
+    return NO;
 }
 
 
-- (void) dealloc
+- (int) applicationMenuPrefsInsertionLocation
 {
-	[ _whitelistWindowController release ];
+    NSBundle* appBundle = [ NSBundle mainBundle ];
+    NSNumber* indx = [ appBundle objectForInfoDictionaryKey: @"ClickToFlashPrefsAppMenuItemIndex" ];
+    if( indx )
+        return [ indx intValue ];
 
-	[ super dealloc ];
-}
-
-
-- (void) awakeFromNib
-{
-	if( !menu ) {
-		NSLog( @"ClickToFlash: Could not load menubar menu" );
-		return;
-	}
-    
-    // We need a submenu item to wrap this loaded menu:
-    
-	NSMenuItem* ctfMenuItem = [ [ [ NSMenuItem alloc ] initWithTitle: [ menu title ]
-															  action: nil
-													   keyEquivalent: @"" ] autorelease ];
-	[ ctfMenuItem setSubmenu: menu ];
-	
-	NSMenu* applicationMenu = [ [ [ NSApp mainMenu ] itemAtIndex: 0 ] submenu ];
-	
-    // Find the location to insert the item:
-    
+	NSMenu* applicationMenu = appMenu();
     int insertLocation = -1, showPrefsItem = -1, lastSeenSep = -1;
     int i, count = [ applicationMenu numberOfItems ];
     for( i = 0 ; i < count ; ++i ) {
         // Put it before the first separator after the preferences item.
         
         NSMenuItem* item = [ applicationMenu itemAtIndex: i ];
-       
+        
         if( [ item action ] == @selector( showPreferences: ) )
             showPrefsItem = i;
         
@@ -111,8 +105,73 @@ static CTFMenubarMenuController* sSingleton = nil;
             insertLocation = 4;  // didn't find it, assume it's item 3 (the default for most apps)
     }
     
+    return insertLocation;
+}
+
+
+#pragma mark -
+#pragma mark Lifetime management
+
+
+static CTFMenubarMenuController* sSingleton = nil;
+
+
+- (id) init
+{
+	if( sSingleton ) {
+		[ self release ];
+		return sSingleton;
+	}
+    
+	self = [ super init ];
+    
+	sSingleton = self;
+	
+	if( self ) {
+		if( ! [ NSBundle loadNibNamed: @"MenubarMenu" owner: self ] )
+			NSLog( @"ClickToFlash: Could not load menubar menu nib" );
+		
+		_views = NSCreateHashTable( NSNonRetainedObjectHashCallBacks, 0 );
+	}
+	
+	return self;
+}
+
+
+- (void) dealloc
+{
+	[ _whitelistWindowController release ];
+    NSFreeHashTable( _views );
+	
+	[ super dealloc ];
+}
+
+
+- (void) awakeFromNib
+{
+    if( ![ self shouldLoadMainMenuItemIntoCurrentProcess ] )
+        return;
+    
+	if( !menu ) {
+		NSLog( @"ClickToFlash: Could not load menubar menu" );
+		return;
+	}
+    
+    // We need a submenu item to wrap this loaded menu:
+    
+	NSMenuItem* ctfMenuItem = [ [ [ NSMenuItem alloc ] initWithTitle: [ menu title ]
+															  action: nil
+													   keyEquivalent: @"" ] autorelease ];
+	[ ctfMenuItem setSubmenu: menu ];
+	
+    // Find the location to insert the item:
+    
+    int insertLocation = [ self applicationMenuPrefsInsertionLocation ];
+    
     // Insert the submenu there:
     
+	NSMenu* applicationMenu = appMenu();
+	
     [ applicationMenu insertItem: ctfMenuItem atIndex: insertLocation ];
 }
 
@@ -127,12 +186,87 @@ static CTFMenubarMenuController* sSingleton = nil;
 
 
 #pragma mark -
+#pragma mark View Management
+
+
+- (void) registerView: (NSView*) view
+{
+	NSHashInsertIfAbsent( _views, view );
+}
+
+
+- (void) unregisterView: (NSView*) view
+{
+	NSHashRemove( _views, view );
+}
+
+
+- (BOOL) _atLeastOneFlashViewExists
+{
+	return NSCountHashTable( _views ) > 0;
+}
+
+
+- (BOOL) _flashViewExistsForKeyWindowWithInvisibleOnly: (BOOL) mustBeInvisible
+{
+	BOOL rslt = NO;
+	
+	NSWindow* keyWindow = [ NSApp keyWindow ];
+	
+	NSHashEnumerator enumerator = NSEnumerateHashTable( _views );
+	CTFClickToFlashPlugin* item;
+	while( item = NSNextHashEnumeratorItem( &enumerator ) ) {
+		if( [ item window ] == keyWindow ) {
+			if( !mustBeInvisible || [ item isConsideredInvisible ] ) {
+				rslt = YES;
+				break;
+			}
+		}
+	}
+	NSEndHashTableEnumeration( &enumerator );
+	
+	return rslt;
+}
+
+- (BOOL) _flashViewExistsForKeyWindow
+{
+	return [ self _flashViewExistsForKeyWindowWithInvisibleOnly: NO ];
+}
+
+- (BOOL) _invisibleFlashViewExistsForKeyWindow;
+{
+	return [ self _flashViewExistsForKeyWindowWithInvisibleOnly: YES ];
+}
+
+- (BOOL) validateMenuItem: (NSMenuItem*) item
+{
+	if ( [ item action ] == @selector( loadAllFlash: ) ) {
+		return [ self _atLeastOneFlashViewExists ];
+	}
+	else if( [ item action ] == @selector( loadKeyWindowFlash: ) ) {
+		return [ self _flashViewExistsForKeyWindow ];
+	}
+	else if( [ item action ] == @selector(loadKeyWindowInvisibleFlash: ) ) {
+		return [ self _invisibleFlashViewExistsForKeyWindow ];
+	}
+	
+	return YES;
+}
+
+#pragma mark -
 #pragma mark Actions
 
 
 - (void) loadFlashForWindow: (NSWindow*) window
 {
     [ [ NSNotificationCenter defaultCenter ] postNotificationName: kCTFLoadFlashViewsForWindow 
+                                                           object: window ];
+}
+
+
+- (void) loadInvisibleFlashForWindow: (NSWindow*) window
+{
+    [ [ NSNotificationCenter defaultCenter ] postNotificationName: kCTFLoadInvisibleFlashViewsForWindow 
                                                            object: window ];
 }
 
@@ -152,6 +286,14 @@ static CTFMenubarMenuController* sSingleton = nil;
 }
 
 
+- (IBAction) loadKeyWindowInvisibleFlash: (id) sender
+{
+	NSWindow* window = [ NSApp keyWindow ];
+	if( window )
+		[ self loadInvisibleFlashForWindow: window ];
+}
+
+
 - (IBAction) showSettingsWindow: (id) sender
 {
 	if( _whitelistWindowController == nil )
@@ -159,6 +301,5 @@ static CTFMenubarMenuController* sSingleton = nil;
 	
 	[ _whitelistWindowController showWindow: sender ];
 }
-
 
 @end
