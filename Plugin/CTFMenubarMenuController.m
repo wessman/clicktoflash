@@ -33,11 +33,12 @@ NSString* kCTFLoadAllFlashViews = @"CTFLoadAllFlashViews";
 NSString* kCTFLoadFlashViewsForWindow = @"CTFLoadFlashViewsForWindow";
 NSString* kCTFLoadInvisibleFlashViewsForWindow = @"CTFLoadInvisibleFlashViewsForWindow";
 
-NSUInteger maxInvisibleDimension = 8;
+NSInteger maxInvisibleDimension = 8;
 
 
 static NSString* kApplicationsToInstallMenuInto[] = {
     @"com.apple.Safari",
+    @"uk.co.opencommunity.vienna2",
     nil
 };
 
@@ -78,32 +79,38 @@ static NSMenu* appMenu()
 {
     NSBundle* appBundle = [ NSBundle mainBundle ];
     NSNumber* indx = [ appBundle objectForInfoDictionaryKey: @"ClickToFlashPrefsAppMenuItemIndex" ];
-    if( indx )
-        return [ indx intValue ];
-
+	
 	NSMenu* applicationMenu = appMenu();
-    int insertLocation = -1, showPrefsItem = -1, lastSeenSep = -1;
-    int i, count = [ applicationMenu numberOfItems ];
-    for( i = 0 ; i < count ; ++i ) {
-        // Put it before the first separator after the preferences item.
-        
-        NSMenuItem* item = [ applicationMenu itemAtIndex: i ];
-        
-        if( [ item action ] == @selector( showPreferences: ) )
-            showPrefsItem = i;
-        
-        if( showPrefsItem >= 0 && [ item isSeparatorItem ] ) {
-            insertLocation = i;
-            break;
-        }
-    }
-    
-    if( insertLocation == -1 ) {
-        if( showPrefsItem >= 0 )
-            insertLocation = showPrefsItem + 1;
-        else
-            insertLocation = 4;  // didn't find it, assume it's item 3 (the default for most apps)
-    }
+	int insertLocation = -1, count = [ applicationMenu numberOfItems ];
+    if( indx ) {
+        insertLocation = [ indx intValue ];
+	} else {
+		int showPrefsItem = -1;
+		int i;
+		for( i = 0 ; i < count ; ++i ) {
+			// Put it before the first separator after the preferences item.
+			
+			NSMenuItem* item = [ applicationMenu itemAtIndex: i ];
+			
+			if( [ item action ] == @selector( showPreferences: ) )
+				showPrefsItem = i;
+			
+			if( showPrefsItem >= 0 && [ item isSeparatorItem ] ) {
+				insertLocation = i;
+				break;
+			}
+		}
+		
+		if( insertLocation == -1 ) {
+			if( showPrefsItem >= 0 )
+				insertLocation = showPrefsItem + 1;
+			else
+				insertLocation = 4;  // didn't find it, assume it's item 3 (the default for most apps)
+		}
+	}
+	
+	if ((insertLocation > count) || (insertLocation < 0))
+		insertLocation = count;
     
     return insertLocation;
 }
@@ -124,8 +131,6 @@ static CTFMenubarMenuController* sSingleton = nil;
 	}
     
 	self = [ super init ];
-    
-	sSingleton = self;
 	
 	if( self ) {
 		if( ! [ NSBundle loadNibNamed: @"MenubarMenu" owner: self ] )
@@ -156,6 +161,19 @@ static CTFMenubarMenuController* sSingleton = nil;
 		NSLog( @"ClickToFlash: Could not load menubar menu" );
 		return;
 	}
+	
+    // Find the location to insert the item:
+    
+    int insertLocation = [ self applicationMenuPrefsInsertionLocation ];
+	
+	// Sanity check the location
+    
+	NSMenu* applicationMenu = appMenu();
+	
+	if ( ( insertLocation < 0 ) || ( insertLocation > [ applicationMenu numberOfItems ] ) ) {
+		NSLog( @"ClickToFlash: Could not insert menu at location %i", insertLocation );
+		return;
+	}
     
     // We need a submenu item to wrap this loaded menu:
     
@@ -163,23 +181,17 @@ static CTFMenubarMenuController* sSingleton = nil;
 															  action: nil
 													   keyEquivalent: @"" ] autorelease ];
 	[ ctfMenuItem setSubmenu: menu ];
-	
-    // Find the location to insert the item:
-    
-    int insertLocation = [ self applicationMenuPrefsInsertionLocation ];
     
     // Insert the submenu there:
     
-	NSMenu* applicationMenu = appMenu();
-	
-    [ applicationMenu insertItem: ctfMenuItem atIndex: insertLocation ];
+	[ applicationMenu insertItem: ctfMenuItem atIndex: insertLocation ];
 }
 
 
 + (CTFMenubarMenuController*) sharedController
 {
 	if( !sSingleton )
-		[ [ CTFMenubarMenuController alloc ] init ];
+		sSingleton = [ [ CTFMenubarMenuController alloc ] init ];
 	
 	return sSingleton;
 }
@@ -215,7 +227,7 @@ static CTFMenubarMenuController* sSingleton = nil;
 	
 	NSHashEnumerator enumerator = NSEnumerateHashTable( _views );
 	CTFClickToFlashPlugin* item;
-	while( item = NSNextHashEnumeratorItem( &enumerator ) ) {
+	while( ( item = NSNextHashEnumeratorItem( &enumerator ) ) ) {
 		if( [ item window ] == keyWindow ) {
 			if( !mustBeInvisible || [ item isConsideredInvisible ] ) {
 				rslt = YES;

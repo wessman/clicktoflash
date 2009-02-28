@@ -86,9 +86,6 @@ static NSString *sAutoLoadInvisibleFlashViewsKey = @"ClickToFlash_autoLoadInvisi
 {
     self = [super init];
     if (self) {
-		// get defaults
-		NSUserDefaults *userDefaults = [NSUserDefaults standardUserDefaults];
-		
 		self.webView = [[[arguments objectForKey:WebPlugInContainerKey] webFrame] webView];
 		
         self.container = [arguments objectForKey:WebPlugInContainingElementKey];
@@ -133,7 +130,7 @@ static NSString *sAutoLoadInvisibleFlashViewsKey = @"ClickToFlash_autoLoadInvisi
 #endif
         
         _fromYouTube = [self.host isEqualToString:@"www.youtube.com"]
-                    || [flashvars rangeOfString: @"www.youtube.com"].location != NSNotFound;
+                    || ( flashvars != nil && [flashvars rangeOfString: @"www.youtube.com"].location != NSNotFound );
         
         // Handle if this is loading from whitelist
         
@@ -208,6 +205,7 @@ static NSString *sAutoLoadInvisibleFlashViewsKey = @"ClickToFlash_autoLoadInvisi
     self.container = nil;
     self.host = nil;
 	self.webView = nil;
+	self.baseURL = nil;
     
     [_flashVars release];
     [_badgeText release];
@@ -280,10 +278,8 @@ static NSString *sAutoLoadInvisibleFlashViewsKey = @"ClickToFlash_autoLoadInvisi
 
 - (BOOL) isConsideredInvisible
 {
-	DOMElement* clonedElement = (DOMElement*) [ self.container cloneNode: NO ];
-	
-	int height = [[clonedElement getAttribute:@"height"] intValue];
-	int width = [[clonedElement getAttribute:@"width"] intValue];
+	int height = (int)([self webView].frame.size.height);
+	int width = (int)([self webView].frame.size.width);
 	
 	return (height <= maxInvisibleDimension) && (width <= maxInvisibleDimension);
 }
