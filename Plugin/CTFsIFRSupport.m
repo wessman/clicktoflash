@@ -2,7 +2,7 @@
 
 The MIT License
 
-Copyright (c) 2008-2009 Click to Flash Developers
+Copyright (c) 2008-2009 ClickToFlash Developers
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -26,13 +26,16 @@ THE SOFTWARE.
 
 #import "CTFsIFRSupport.h"
 
+#import "CTFUserDefaultsController.h"
+#import "CTFPreferencesDictionary.h"
+
 typedef enum {
 	CTFSifrModeDoNothing	= 0, 
 	CTFSifrModeAutoLoadSifr	= 1, 
 	CTFSifrModeDeSifr		= 2
 } CTFSifrMode;
 
-static NSString *sSifrModeDefaultsKey = @"ClickToFlash_sifrMode";
+static NSString *sSifrModeDefaultsKey = @"sifrMode";
 
 static NSString *sSifr2Test		= @"sIFR != null && typeof sIFR == \"function\"";
 static NSString *sSifr3Test		= @"sIFR != null && typeof sIFR == \"object\"";
@@ -46,7 +49,7 @@ static NSString *sSifr3AddOnJSFilename = @"sifr3-addons";
 - (NSUInteger) _sifrVersionInstalled
 {	
 	// get the container's WebView
-	WebView *sifrWebView = self.webView;
+	WebView *sifrWebView = [self webView];
 	NSUInteger version = 0;
     
 	if (sifrWebView) {
@@ -61,7 +64,7 @@ static NSString *sSifr3AddOnJSFilename = @"sifr3-addons";
 
 - (BOOL) _shouldDeSIFR
 {
-    if ([[NSUserDefaults standardUserDefaults] integerForKey: sSifrModeDefaultsKey] == CTFSifrModeDeSifr) {
+    if ([[CTFUserDefaultsController standardUserDefaults] integerForKey: sSifrModeDefaultsKey] == CTFSifrModeDeSifr) {
         _sifrVersion = [self _sifrVersionInstalled];
         
         if( _sifrVersion != 0 )
@@ -73,13 +76,13 @@ static NSString *sSifr3AddOnJSFilename = @"sifr3-addons";
 
 - (BOOL) _shouldAutoLoadSIFR
 {
-    return [[NSUserDefaults standardUserDefaults] integerForKey: sSifrModeDefaultsKey] == CTFSifrModeAutoLoadSifr;
+    return [[CTFUserDefaultsController standardUserDefaults] integerForKey: sSifrModeDefaultsKey] == CTFSifrModeAutoLoadSifr;
 }        
 
 - (void) _disableSIFR
 {	
 	// get the container's WebView
-	WebView *sifrWebView = self.webView;
+	WebView *sifrWebView = [self webView];
 	
 	// if sifr add-ons are not installed, load version-appropriate version into page
 	if ([[sifrWebView stringByEvaluatingJavaScriptFromString: sSifrAddOnTest] isEqualToString: @"true"]) {

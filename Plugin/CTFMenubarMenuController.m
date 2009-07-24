@@ -2,7 +2,7 @@
 
 The MIT License
 
-Copyright (c) 2008-2009 Click to Flash Developers
+Copyright (c) 2008-2009 ClickToFlash Developers
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -35,10 +35,12 @@ NSString* kCTFLoadInvisibleFlashViewsForWindow = @"CTFLoadInvisibleFlashViewsFor
 
 NSInteger maxInvisibleDimension = 8;
 
-
 static NSString* kApplicationsToInstallMenuInto[] = {
     @"com.apple.Safari",
     @"uk.co.opencommunity.vienna2",
+#if 0
+    @"com.panic.Coda", // for debugging an app that includes its own old Sparkle framework.
+#endif
     nil
 };
 

@@ -2,7 +2,7 @@
 
 The MIT License
 
-Copyright (c) 2008-2009 Click to Flash Developers
+Copyright (c) 2008-2009 ClickToFlash Developers
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -29,33 +29,71 @@ THE SOFTWARE.
 #import <WebKit/WebKit.h>
 
 @interface CTFClickToFlashPlugin : NSView <WebPlugInViewFactory> {
+	NSArray *defaultWhitelist;
+	
     DOMElement *_container;
     NSString *_host;
     NSDictionary* _flashVars;
-    NSTrackingArea *trackingArea;
+    id trackingArea;
     NSAlert* _activeAlert;
     NSString* _badgeText;
     BOOL mouseIsDown;
     BOOL mouseInside;
     BOOL _isLoadingFromWhitelist;
     BOOL _fromYouTube;
+	BOOL _embeddedYouTubeView;
+	BOOL _hasH264Version;
+	BOOL _hasHDH264Version;
 	WebView *_webView;
 	NSUInteger _sifrVersion;
 	NSString *_baseURL;
+	NSDictionary *_attributes;
+	NSDictionary *_originalOpacityAttributes;
+	NSString *_src;
+	NSString *_videoId;
+	NSString *_launchedAppBundleIdentifier;
+
+	BOOL _contextMenuIsVisible;
+	BOOL _receivedAllResponses;
+	NSURLConnection *connections[2];
+	unsigned expectedResponses;
+	NSTimer *_delayingTimer;
 }
 
 + (NSView *)plugInViewWithArguments:(NSDictionary *)arguments;
 
 - (id) initWithArguments:(NSDictionary *)arguments;
+- (void)_migratePrefsToExternalFile;
+- (void) _addApplicationWhitelistArrayToPrefsFile;
 
-@property (nonatomic, retain) DOMElement *container;
-@property (nonatomic, retain) NSString *host;
-@property (nonatomic, retain) WebView *webView;
-@property (retain) NSString *baseURL;
+- (DOMElement *)container;
+- (void)setContainer:(DOMElement *)newValue;
+- (NSString *)host;
+- (void)setHost:(NSString *)newValue;
+- (WebView *)webView;
+- (void)setWebView:(WebView *)newValue;
+- (NSString *)baseURL;
+- (void)setBaseURL:(NSString *)newValue;
+- (NSDictionary *)attributes;
+- (void)setAttributes:(NSDictionary *)newValue;
+- (NSDictionary *)originalOpacityAttributes;
+- (void)setOriginalOpacityAttributes:(NSDictionary *)newValue;
+- (NSString *)src;
+- (void)setSrc:(NSString *)newValue;
+- (NSString *)videoId;
+- (void)setVideoId:(NSString *)newValue;
+- (BOOL)_hasH264Version;
+- (void)_setHasH264Version:(BOOL)newValue;
+- (BOOL)_hasHDH264Version;
+- (void)_setHasHDH264Version:(BOOL)newValue;
+- (NSString *)launchedAppBundleIdentifier;
+- (void)setLaunchedAppBundleIdentifier:(NSString *)newValue;
 
 - (IBAction)loadFlash:(id)sender;
 - (IBAction)loadH264:(id)sender;
 - (IBAction)loadAllOnPage:(id)sender;
+
+- (IBAction)downloadH264:(id)sender;
 
 - (BOOL) isConsideredInvisible;
 

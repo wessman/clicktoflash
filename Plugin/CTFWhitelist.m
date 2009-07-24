@@ -2,7 +2,7 @@
 
 The MIT License
 
-Copyright (c) 2008-2009 Click to Flash Developers
+Copyright (c) 2008-2009 ClickToFlash Developers
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -29,12 +29,15 @@ THE SOFTWARE.
 #import "CTFUtilities.h"
 #import "CTFMenubarMenuController.h"
 
+#import "CTFUserDefaultsController.h"
+#import "CTFPreferencesDictionary.h"
+
 
     // NSNotification names
 static NSString *sCTFWhitelistAdditionMade = @"CTFWhitelistAdditionMade";
 
-    // NSUserDefaults keys
-static NSString *sHostSiteInfoDefaultsKey = @"ClickToFlash_siteInfo";
+    // CTFUserDefaultsController keys
+static NSString *sHostSiteInfoDefaultsKey = @"siteInfo";
 
 typedef enum {
     CTFSiteKindWhitelist = 0
@@ -122,7 +125,7 @@ static NSDictionary* whitelistItemForSite( NSString* site )
 - (void) _askToAddCurrentSiteToWhitelist
 {
     NSString *title = NSLocalizedString(@"Always load Flash for this site?", @"Always load Flash for this site? alert title");
-    NSString *message = [NSString stringWithFormat:NSLocalizedString(@"Add %@ to the whitelist?", @"Add <sitename> to the whitelist? alert message"), self.host];
+    NSString *message = [NSString stringWithFormat:NSLocalizedString(@"Add %@ to the whitelist?", @"Add <sitename> to the whitelist? alert message"), [self host]];
     
     NSAlert *alert = [[NSAlert alloc] init];
     [alert addButtonWithTitle:NSLocalizedString(@"Add to Whitelist", @"Add to Whitelist button")];
@@ -149,18 +152,24 @@ static NSDictionary* whitelistItemForSite( NSString* site )
 
 - (BOOL) _isHostWhitelisted
 {
-	return [self _isWhiteListedForHostString: self.host];
+	// Nil hosts whitelisted by default (e.g. Dashboard)
+	if (![self host])
+	{
+		return YES;
+	}
+	
+	return [self _isWhiteListedForHostString: [self host]];
 }
 
 - (BOOL) _isWhiteListedForHostString:(NSString *)hostString
 {
-	NSArray *hostWhitelist = [[NSUserDefaults standardUserDefaults] arrayForKey: sHostSiteInfoDefaultsKey];
+	NSArray *hostWhitelist = [[CTFUserDefaultsController standardUserDefaults] arrayForKey: sHostSiteInfoDefaultsKey];
     return hostWhitelist && itemForSite(hostWhitelist, hostString) != nil;
 }
 
 - (NSMutableArray *) _mutableSiteInfo
 {
-    NSMutableArray *hostWhitelist = [[[[NSUserDefaults standardUserDefaults] arrayForKey: sHostSiteInfoDefaultsKey] mutableCopy] autorelease];
+    NSMutableArray *hostWhitelist = [[[[CTFUserDefaultsController standardUserDefaults] arrayForKey: sHostSiteInfoDefaultsKey] mutableCopy] autorelease];
     if (hostWhitelist == nil) {
         hostWhitelist = [NSMutableArray array];
     }
@@ -170,20 +179,11 @@ static NSDictionary* whitelistItemForSite( NSString* site )
 - (void) _addHostToWhitelist
 {
     NSMutableArray *siteInfo = [self _mutableSiteInfo];
-    [siteInfo addObject: whitelistItemForSite(self.host)];
-    [[NSUserDefaults standardUserDefaults] setObject: siteInfo forKey: sHostSiteInfoDefaultsKey];
+    [siteInfo addObject: whitelistItemForSite([self host])];
+	
+	[[CTFUserDefaultsController standardUserDefaults] setValue:siteInfo forKeyPath:@"values.siteInfo"];
+	
     [[NSNotificationCenter defaultCenter] postNotificationName: sCTFWhitelistAdditionMade object: self];
-}
-
-- (void) _removeHostFromWhitelist
-{
-    NSMutableArray *siteInfo = [self _mutableSiteInfo];
-    NSUInteger foundIndex = indexOfItemForSite(siteInfo, self.host);
-    
-    if(foundIndex != NSNotFound) {
-        [siteInfo removeObjectAtIndex: foundIndex];
-        [[NSUserDefaults standardUserDefaults] setObject: siteInfo forKey: sHostSiteInfoDefaultsKey];
-    }
 }
 
 - (void) _whitelistAdditionMade: (NSNotification*) notification
@@ -198,37 +198,6 @@ static NSDictionary* whitelistItemForSite( NSString* site )
         return;
     
     [self _addHostToWhitelist];
-}
-
-- (IBAction) removeFromWhitelist: (id)sender
-{
-    if (![self _isHostWhitelisted])
-        return;
-    
-    NSString *title = NSLocalizedString(@"Stop always loading Flash?", @"Stop always loading Flash? alert title");
-    NSString *message = [NSString stringWithFormat:NSLocalizedString(@"Remove %@ from the whitelist?", @"Remove %@ from the whitelist? alert message"), self.host];
-    
-    NSAlert *alert = [[NSAlert alloc] init];
-    [alert addButtonWithTitle:NSLocalizedString(@"Remove from Whitelist", @"Remove from Whitelist button")];
-    [alert addButtonWithTitle:NSLocalizedString(@"Cancel", @"Cancel button")];
-    [alert setMessageText:title];
-    [alert setInformativeText:message];
-    [alert setAlertStyle:NSInformationalAlertStyle];
-    [alert beginSheetModalForWindow:[self window]
-                      modalDelegate:self
-                     didEndSelector:@selector(_removeFromWhitelistAlertDidEnd:returnCode:contextInfo:)
-                        contextInfo:nil];
-    _activeAlert = alert;
-}
-
-- (void) _removeFromWhitelistAlertDidEnd: (NSAlert *)alert returnCode: (int)returnCode contextInfo: (void *)contextInfo
-{
-    if (returnCode == NSAlertFirstButtonReturn)
-    {
-        [self _removeHostFromWhitelist];
-    }
-    
-    [ self _alertDone ];
 }
 
 - (IBAction) editWhitelist: (id)sender;
