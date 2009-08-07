@@ -1,13 +1,5 @@
 This page only hosts the source code for ClickToFlash.  To download ClickToFlash, learn how to use it, solve installation problems, fix a PandoraJam incompatibility issue, and more, please visit the [ClickToFlash website](http://rentzsch.github.com/clicktoflash/).
 
-<<<<<<< HEAD:README.markdown
-<<<<<<< HEAD:README.markdown
-*NOTE: this is wessman's fork for development and experimentation, not widespread release. You're probably looking for an official release from [rentzch](https://github.com/rentzsch):*
-
-- ["Official" ClickToFlash repository](https://github.com/rentzsch/clicktoflash/tree)
-
-- [Download ClickToFlash 1.4.2 here](http://s3.amazonaws.com/clicktoflash/ClickToFlash-1.4.2.zip).
-=======
 ##Version History
 
 * **1.5b5** [download](http://s3.amazonaws.com/clicktoflash/ClickToFlash-1.5b5.zip)
@@ -18,18 +10,6 @@ This page only hosts the source code for ClickToFlash.  To download ClickToFlash
 
 	* [FIX] Website whitelist works again. (Simone Manganelli's fault for the bug, also for the fix [1](http://github.com/rentzsch/clicktoflash/commit/2a7423af19ed8d1ea37b3a37a6cee68ef8e8f8f2), [2](http://github.com/rentzsch/clicktoflash/commit/a87d6f32f60353e931cfa0ad6e24321e9fd80b1b))
 
-=======
-##Version History
-
-* **1.5b5** [download](http://s3.amazonaws.com/clicktoflash/ClickToFlash-1.5b5.zip)
-
-	* [NEW] Support for HD YouTube videos. ([Simone Manganelli](http://github.com/rentzsch/clicktoflash/commit/e03c375ae6358d09e23e371c8402902c2fae14de))
-
-	* [NEW] YouTube H.264 support now works with embedded videos. ([Simone Manganelli](http://github.com/rentzsch/clicktoflash/commit/fe5d72cec8d65ab3ea78650fbeb985a9718b6c3f))
-
-	* [FIX] Website whitelist works again. (Simone Manganelli's fault for the bug, also for the fix [1](http://github.com/rentzsch/clicktoflash/commit/2a7423af19ed8d1ea37b3a37a6cee68ef8e8f8f2), [2](http://github.com/rentzsch/clicktoflash/commit/a87d6f32f60353e931cfa0ad6e24321e9fd80b1b))
-
->>>>>>> 6370e2f19fd1d4c2232d8dbcfc9ba31d49fe5b5f:README.markdown
 	* [NEW] Mac app devs can opt out of ClickToFlash on their own by setting 'ClickToFlashOptOut' to YES in their app's Info.plist file. ([Simone Manganelli](http://github.com/rentzsch/clicktoflash/commit/7afbf03f62dd77eac1377d6bf4a38f4efd780771))
 
 	* [CHANGE] Gear contextual menu is now always displayed, unless hidden pref 'drawGearImageOnlyOnMouseOver' is set to YES. ([Simone Manganelli](http://github.com/rentzsch/clicktoflash/commit/9524aea31f41cb769b3b2f9bc1d15955d5ed2a1a))
@@ -278,4 +258,3 @@ flash boxes when whitelisting one ([bug 10](http://rentzsch.lighthouseapp.com/pr
 	* [DEV] Store white-listed sites in an array instead of composite keys. ([Jean-Francois Roy](https://twitter.com/jfroy/status/1150564777))
 
 * **1.0** original Google Code release
->>>>>>> 6370e2f19fd1d4c2232d8dbcfc9ba31d49fe5b5f:README.markdown
