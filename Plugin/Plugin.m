@@ -180,8 +180,8 @@ BOOL usingMATrackingArea = NO;
 			} else {
 				[self setToolTip:[self src]];
 			}
-		}		
-        
+		}
+
         // Read in flashvars (needed to determine YouTube videos)
         
         NSString* flashvars = [[self attributes] objectForKey: @"flashvars" ];
