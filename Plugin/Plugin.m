@@ -170,8 +170,17 @@ BOOL usingMATrackingArea = NO;
 		
 		// set tooltip
 		
-		if ([self src]) [self setToolTip:[self src]];
-		
+		if ([self src]) {
+			int srcLength = [[self src] length];
+			if ([[self src] length] > 200) {
+				NSString *srcStart = [[self src] substringToIndex:150];
+				NSString *srcEnd = [[self src] substringFromIndex:(srcLength-50)];
+				NSString *shortenedSrc = [NSString stringWithFormat:@"%@…%@",srcStart,srcEnd];
+				[self setToolTip:shortenedSrc];
+			} else {
+				[self setToolTip:[self src]];
+			}
+		}		
         
         // Read in flashvars (needed to determine YouTube videos)
         
@@ -182,8 +191,11 @@ BOOL usingMATrackingArea = NO;
 		// check whether it's from YouTube and get the video_id
 		
         _fromYouTube = [[self host] isEqualToString:@"www.youtube.com"]
+		|| [[self host] isEqualToString:@"www.youtube-nocookie.com"]
 		|| ( flashvars != nil && [flashvars rangeOfString: @"www.youtube.com"].location != NSNotFound )
-		|| ([self src] != nil && [[self src] rangeOfString: @"youtube.com"].location != NSNotFound );
+		|| ( flashvars != nil && [flashvars rangeOfString: @"www.youtube-nocookie.com"].location != NSNotFound )
+		|| ([self src] != nil && [[self src] rangeOfString: @"youtube.com"].location != NSNotFound )
+		|| ([self src] != nil && [[self src] rangeOfString: @"youtube-nocookie.com"].location != NSNotFound );
 		
         if (_fromYouTube) {
 			NSString *videoId = [ self flashvarWithName: @"video_id" ];
@@ -209,6 +221,13 @@ BOOL usingMATrackingArea = NO;
 					
 					[URLScanner scanUpToString:@"&" intoString:&videoIdFromURL];
 					if (videoIdFromURL) [self setVideoId:videoIdFromURL];
+				} else {
+					[URLScanner setScanLocation:0];
+					[URLScanner scanUpToString:@"youtube-nocookie.com/v/" intoString:nil];
+					if ([URLScanner scanString:@"youtube-nocookie.com/v/" intoString:nil]) {
+						[URLScanner scanUpToString:@"&" intoString:&videoIdFromURL];
+						if (videoIdFromURL) [self setVideoId:videoIdFromURL];
+					}
 				}
 				[URLScanner release];
 				
@@ -695,10 +714,18 @@ BOOL usingMATrackingArea = NO;
     SEL action = [menuItem action];
     if (action == @selector(addToWhitelist:))
     {
-        NSString* title = [NSString stringWithFormat:
-                NSLocalizedString(@"Add %@ to Whitelist", @"Add <sitename> to Whitelist menu title"), 
-                [self host]];
-        [menuItem setTitle: title];
+		if ([self host]) {
+			NSString* title = [NSString stringWithFormat:
+							   NSLocalizedString(@"Add %@ to Whitelist", @"Add <sitename> to Whitelist menu title"), 
+							   [self host]];
+			[menuItem setTitle: title];
+		} else {
+			// this case happens sometimes if the base URL is "about:blank",
+			// so there's no base URL to use for the whitelist, so just disable
+			// the menu item
+			enabled = NO;
+		}
+       
         if ([self _isHostWhitelisted])
             enabled = NO;
     }
@@ -784,10 +811,15 @@ BOOL usingMATrackingArea = NO;
 	
 	NSString* str = [ self badgeLabelText ];
 	
+	NSShadow *superAwesomeShadow = [[NSShadow alloc] init];
+	[superAwesomeShadow setShadowOffset:NSMakeSize(2.0, -2.0)];
+	[superAwesomeShadow setShadowColor:[NSColor whiteColor]];
+	[superAwesomeShadow autorelease];
 	NSDictionary* attrs = [ NSDictionary dictionaryWithObjectsAndKeys: 
 						   [ NSFont boldSystemFontOfSize: 20 ], NSFontAttributeName,
 						   [ NSNumber numberWithInt: -1 ], NSKernAttributeName,
 						   [ NSColor blackColor ], NSForegroundColorAttributeName,
+						   superAwesomeShadow, NSShadowAttributeName,
 						   nil ];
 	
 	// Set up for drawing.
@@ -804,7 +836,8 @@ BOOL usingMATrackingArea = NO;
 	// Compute a scale factor based on the view's size.
 	
 	float maxW = NSWidth( bounds ) - kMinMargin;
-	float maxH = NSHeight( bounds ) - kMinMargin;
+	// the 9/10 factor here is to account for the 60% vertical top-biasing
+	float maxH = NSHeight( bounds )*9/10 - kMinMargin;
 	float minW = kMinHeight * w / h;
 	
 	BOOL rotate = NO;
@@ -842,7 +875,8 @@ BOOL usingMATrackingArea = NO;
 	[ NSGraphicsContext saveGraphicsState ];
     
 	NSAffineTransform* xform = [ NSAffineTransform transform ];
-	[ xform translateXBy: NSWidth( bounds ) / 2 yBy: NSHeight( bounds ) / 2 ];
+	// vertical top-bias by 60% here
+	[ xform translateXBy: NSWidth( bounds ) / 2 yBy: NSHeight( bounds ) / 10 * 6 ];
 	[ xform scaleBy: scaleFactor ];
 	if( rotate )
 		[ xform rotateByDegrees: 90 ];
@@ -1334,11 +1368,7 @@ didReceiveResponse:(NSHTTPURLResponse *)response
 {
 	NSString* YouTubePageURL = [ NSString stringWithFormat: @"http://www.youtube.com/watch?v=%@", [self videoId] ];
 	
-	[[NSWorkspace sharedWorkspace] openURLs:[NSArray arrayWithObject:[NSURL URLWithString:YouTubePageURL]]
-					withAppBundleIdentifier:[self launchedAppBundleIdentifier]
-									options:NSWorkspaceLaunchDefault
-			 additionalEventParamDescriptor:[NSAppleEventDescriptor nullDescriptor]
-						  launchIdentifiers:nil];
+    [_webView setMainFrameURL:YouTubePageURL];
 }
 
 - (IBAction)openFullscreenInQTPlayer:(id)sender;
