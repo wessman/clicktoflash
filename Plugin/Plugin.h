@@ -41,7 +41,9 @@ THE SOFTWARE.
     BOOL mouseInside;
     BOOL _isLoadingFromWhitelist;
     BOOL _fromYouTube;
+    BOOL _fromFlickr;
 	BOOL _embeddedYouTubeView;
+	BOOL _youTubeAutoPlay;
 	BOOL _hasH264Version;
 	BOOL _hasHDH264Version;
 	WebView *_webView;
@@ -64,6 +66,7 @@ THE SOFTWARE.
 
 - (id) initWithArguments:(NSDictionary *)arguments;
 - (void)_migratePrefsToExternalFile;
+- (void)_uniquePrefsFileWhitelist;
 - (void) _addApplicationWhitelistArrayToPrefsFile;
 
 - (DOMElement *)container;
@@ -85,6 +88,8 @@ THE SOFTWARE.
 - (BOOL)_hasH264Version;
 - (void)_setHasH264Version:(BOOL)newValue;
 - (BOOL)_hasHDH264Version;
+- (NSString*)_h264VersionUrl;
+- (BOOL)_isVideoElementAvailable;
 - (void)_setHasHDH264Version:(BOOL)newValue;
 - (NSString *)launchedAppBundleIdentifier;
 - (void)setLaunchedAppBundleIdentifier:(NSString *)newValue;

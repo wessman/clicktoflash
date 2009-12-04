@@ -34,10 +34,14 @@ THE SOFTWARE.
 #import "CTFUtilities.h"
 #import "CTFWhitelist.h"
 #import "NSBezierPath-RoundedRectangle.h"
-#import "CTGradient.h"
+#import "CTFGradient.h"
 #import "SparkleManager.h"
 
 #define LOGGING_ENABLED 0
+
+#ifndef NSAppKitVersionNumber10_5
+#define NSAppKitVersionNumber10_5 949
+#endif
 
     // MIME types
 static NSString *sFlashOldMIMEType = @"application/x-shockwave-flash";
@@ -50,6 +54,8 @@ static NSString *sAutoLoadInvisibleFlashViewsKey = @"autoLoadInvisibleViews";
 static NSString *sPluginEnabled = @"pluginEnabled";
 static NSString *sApplicationWhitelist = @"applicationWhitelist";
 static NSString *sDrawGearImageOnlyOnMouseOverHiddenPref = @"drawGearImageOnlyOnMouseOver";
+static NSString *sDisableVideoElement = @"disableVideoElement";
+static NSString *sYouTubeAutoPlay = @"enableYouTubeAutoPlay";
 
 	// Info.plist key for app developers
 static NSString *sCTFOptOutKey = @"ClickToFlashOptOut";
@@ -75,6 +81,7 @@ BOOL usingMATrackingArea = NO;
 
 - (NSDictionary*) _flashVarDictionary: (NSString*) flashvarString;
 - (NSDictionary*) _flashVarDictionaryFromYouTubePageHTML: (NSString*) youTubePageHTML;
+- (void)_didRetrieveEmbeddedPlayerFlashVars:(NSDictionary *)flashVars;
 - (void)_getEmbeddedPlayerFlashVarsAndCheckForVariantsWithVideoId:(NSString *)videoId;
 - (NSString*) flashvarWithName: (NSString*) argName;
 - (void) _checkForH264VideoVariants;
@@ -114,6 +121,7 @@ BOOL usingMATrackingArea = NO;
 		_hasHDH264Version = NO;
 		_contextMenuIsVisible = NO;
 		_embeddedYouTubeView = NO;
+		_youTubeAutoPlay = NO;
 		_delayingTimer = nil;
 		defaultWhitelist = [NSArray arrayWithObjects:	@"com.apple.frontrow",
 														@"com.apple.dashboard.client",
@@ -125,6 +133,8 @@ BOOL usingMATrackingArea = NO;
 														@"com.Zattoo.prefs",
 														@"fr.understudy.HuluPlayer",
 														@"com.apple.iWeb",
+														@"com.realmacsoftware.rapidweaverpro",
+														@"com.realmacsoftware.littlesnapper",
 							nil];
 		
 		SparkleManager *sharedSparkleManager = [SparkleManager sharedManager];
@@ -148,6 +158,7 @@ BOOL usingMATrackingArea = NO;
         
         [self _migrateWhitelist];
 		[self _migratePrefsToExternalFile];
+		[self _uniquePrefsFileWhitelist];
 		[self _addApplicationWhitelistArrayToPrefsFile];
         
 		
@@ -199,6 +210,20 @@ BOOL usingMATrackingArea = NO;
 		|| ([self src] != nil && [[self src] rangeOfString: @"youtube-nocookie.com"].location != NSNotFound );
 		
         if (_fromYouTube) {
+			
+			// Check wether autoplay is wanted
+			if ([[CTFUserDefaultsController standardUserDefaults] objectForKey:sYouTubeAutoPlay]) {
+				if ([[self host] isEqualToString:@"www.youtube.com"]
+					|| [[self host] isEqualToString:@"www.youtube-nocookie.com"]) {
+					_youTubeAutoPlay = YES;
+				} else {
+					_youTubeAutoPlay = [[[self _flashVarDictionary:[self src]] objectForKey:@"autoplay"] isEqualToString:@"1"];
+				}
+			} else {
+				_youTubeAutoPlay = NO;
+			}
+
+			
 			NSString *videoId = [ self flashvarWithName: @"video_id" ];
 			if (videoId != nil) {
 				[self setVideoId:videoId];
@@ -242,7 +267,8 @@ BOOL usingMATrackingArea = NO;
 				}
 			}
 		}
-		
+        
+        _fromFlickr = [[self host] rangeOfString:@"flickr.com"].location != NSNotFound;
 		
 #if LOGGING_ENABLED
         NSLog( @"arguments = %@", arguments );
@@ -436,6 +462,7 @@ BOOL usingMATrackingArea = NO;
 	[self setWebView:nil];
 	[self setBaseURL:nil];
 	[self setAttributes:nil];
+	[self setOriginalOpacityAttributes:nil];
 	
 	[_flashVars release];
 	_flashVars = nil;
@@ -500,6 +527,10 @@ BOOL usingMATrackingArea = NO;
 					NSMutableArray *combinedWhitelist = [NSMutableArray arrayWithArray:prefValue];
 					[combinedWhitelist addObjectsFromArray:existingExternalPref];
 					[externalFileDefaults setObject:combinedWhitelist forKey:externalPrefDefaultName];
+					
+					// because people named Kevin Ballard messed up their preferences file and somehow
+					// managed to retain ClickToFlash_siteInfo in their com.github plist file
+					[externalFileDefaults removeObjectForKey:currentParasiticDefault];
 				}
 			}
 			// eliminate the parasitic default, regardless of whether we transferred them or not
@@ -508,6 +539,15 @@ BOOL usingMATrackingArea = NO;
 	}
 	[[NSUserDefaults standardUserDefaults] removeSuiteNamed:@"com.github.rentzsch.clicktoflash"];
 }
+
+- (void) _uniquePrefsFileWhitelist
+{
+	NSArray *siteInfoArray = [[CTFUserDefaultsController standardUserDefaults] arrayForKey:@"siteInfo"];
+	NSSet *siteInfoSet = [NSSet setWithArray:siteInfoArray];
+	
+	[[CTFUserDefaultsController standardUserDefaults] setValue:[siteInfoSet allObjects] forKeyPath:@"values.siteInfo"];
+}
+
 
 - (void) _addApplicationWhitelistArrayToPrefsFile
 {
@@ -838,7 +878,7 @@ BOOL usingMATrackingArea = NO;
 	
 	float maxW = NSWidth( bounds ) - kMinMargin;
 	// the 9/10 factor here is to account for the 60% vertical top-biasing
-	float maxH = NSHeight( bounds )*9/10 - kMinMargin;
+	float maxH = _fromFlickr ? NSHeight( bounds )*9/10 - kMinMargin : NSHeight( bounds ) - kMinMargin;
 	float minW = kMinHeight * w / h;
 	
 	BOOL rotate = NO;
@@ -877,7 +917,11 @@ BOOL usingMATrackingArea = NO;
     
 	NSAffineTransform* xform = [ NSAffineTransform transform ];
 	// vertical top-bias by 60% here
-	[ xform translateXBy: NSWidth( bounds ) / 2 yBy: NSHeight( bounds ) / 10 * 6 ];
+    if (_fromFlickr) {
+        [ xform translateXBy: NSWidth( bounds ) / 2 yBy: NSHeight( bounds ) / 10 * 6 ];
+    } else {
+        [ xform translateXBy: NSWidth( bounds ) / 2 yBy: NSHeight( bounds ) / 2 ];
+    }
 	[ xform scaleBy: scaleFactor ];
 	if( rotate )
 		[ xform rotateByDegrees: 90 ];
@@ -885,7 +929,7 @@ BOOL usingMATrackingArea = NO;
 	
     CGContextRef context = [ [ NSGraphicsContext currentContext ] graphicsPort ];
     
-    CGContextSetAlpha( context, pressed ? 0.40 : 0.25 );
+    CGContextSetAlpha( context, pressed ? 0.45 : 0.30 );
     CGContextBeginTransparencyLayer( context, nil );
 	
 	// Draw everything at full size, centered on the origin.
@@ -893,15 +937,20 @@ BOOL usingMATrackingArea = NO;
 	NSPoint loc = { -strSize.width / 2, -strSize.height / 2 };
 	NSRect borderRect = NSMakeRect( loc.x - kFrameXInset, loc.y - kFrameYInset, w, h );
 	
-	NSBezierPath* fillPath = bezierPathWithRoundedRectCornerRadius( NSInsetRect( borderRect, -2, -2 ), 6 );
-	[ [ NSColor colorWithCalibratedWhite: 1.0 alpha: 0.25 ] set ];
-	[ fillPath fill ];
-	
-	NSBezierPath* path = bezierPathWithRoundedRectCornerRadius( borderRect, 4 );
-	[ [ NSColor blackColor ] set ];
-	[ path setLineWidth: 3 ];
-	[ path stroke ];
-	
+    NSBezierPath* fillPath = bezierPathWithRoundedRectCornerRadius( borderRect, 4 );
+    [ [ NSColor colorWithCalibratedWhite: 1.0 alpha: 0.45 ] set ];
+    [ fillPath fill ];
+    
+    NSBezierPath* darkBorderPath = bezierPathWithRoundedRectCornerRadius( borderRect, 4 );
+    [[NSColor blackColor] set];
+    [ darkBorderPath setLineWidth: 3 ];
+    [ darkBorderPath stroke ];
+    
+    NSBezierPath* lightBorderPath = bezierPathWithRoundedRectCornerRadius( NSInsetRect(borderRect, -2, -2), 6 );
+    [ [ NSColor colorWithCalibratedWhite: 1.0 alpha: 0.45 ] set ];
+    [ lightBorderPath setLineWidth: 2 ];
+    [ lightBorderPath stroke ];
+    
     [ str drawAtPoint: loc withAttributes: attrs ];
 	
 	// Now restore the graphics state:
@@ -993,7 +1042,7 @@ BOOL usingMATrackingArea = NO;
 		//tweak the opacity of the endingColor for compatibility with CTGradient
 		endingColor = [NSColor colorWithDeviceWhite:0.0 alpha:0.00];
 		
-		gradient = [CTGradient gradientWithBeginningColor:startingColor
+		gradient = [CTFGradient gradientWithBeginningColor:startingColor
 											  endingColor:endingColor];
 		
 		//angle is reversed compared to NSGradient
@@ -1144,7 +1193,7 @@ BOOL usingMATrackingArea = NO;
 
 - (NSString*) flashvarWithName: (NSString*) argName
 {
-    return [ _flashVars objectForKey: argName ];
+    return [[[ _flashVars objectForKey: argName ] retain] autorelease];
 }
 
 /*- (NSString*) _videoId
@@ -1256,33 +1305,119 @@ didReceiveResponse:(NSHTTPURLResponse *)response
 	&& [ [ CTFUserDefaultsController standardUserDefaults ] boolForKey: sPluginEnabled ];
 }
 
-- (void) _convertElementForMP4: (DOMElement*) element
+- (BOOL)_isVideoElementAvailable
+{
+	if ( [[CTFUserDefaultsController standardUserDefaults] boolForKey:sDisableVideoElement] )
+		return NO;
+	
+	/* <video> element compatibility was added to WebKit in or shortly before version 525. */
+	
+    NSBundle* webKitBundle;
+    webKitBundle = [ NSBundle bundleForClass: [ WebView class ] ];
+    if (webKitBundle) {
+		/* ref. http://lists.apple.com/archives/webkitsdk-dev/2008/Nov/msg00003.html:
+		 * CFBundleVersion is 5xxx.y on WebKits built to run on Leopard, 4xxx.y on Tiger.
+		 * Unspecific builds (such as the ones in OmniWeb) get xxx.y numbers without a prefix.
+		 */
+		int normalizedVersion;
+		float wkVersion = [ (NSString*) [ [ webKitBundle infoDictionary ] 
+										 valueForKey: @"CFBundleVersion" ] 
+						   floatValue ];
+		if (wkVersion > 4000)
+			normalizedVersion = (int)wkVersion % 1000;
+		else
+			normalizedVersion = wkVersion;
+		
+		// unfortunately, versions of WebKit above 531.5 also introduce a nasty
+		// scrolling bug with video elements that cause them to be unviewable;
+		// this bug was fixed shortly after being reported by @simX, so we can
+		// now re-enable it for correct WebKit versions
+		//
+		// this bug actually only affected certain machines that had graphics
+		// cards with a certain max texture size, and it was partially fixed, but
+		// still didn't work for MacBooks with embedded graphics, and we could
+		// detect that if we really wanted, but that would require importing
+		// the OpenGL framework, which we probably shouldn't do, so we'll just
+		// wholesale disable for certain WebKit versions
+		//
+		// https://bugs.webkit.org/show_bug.cgi?id=28705
+		
+		if (floor(NSAppKitVersionNumber) > NSAppKitVersionNumber10_5) {
+			// Snowy Leopard; this bug doesn't seem to be exhibited here
+			return (normalizedVersion >= 525);
+		} else {
+			// this bug was introduced in version 531.5, but has been fixed in
+			// 532 and above
+			
+			return ((normalizedVersion >= 532) ||
+					((normalizedVersion >= 525) && (normalizedVersion < 531.5))
+					);
+		}
+	}
+	return NO;
+}
+
+- (NSString*) _h264VersionUrl
 {
     NSString* video_id = [self videoId];
     NSString* video_hash = [ self _videoHash ];
     
 	NSString* src;
-	if ([self _hasHDH264Version]) {
+	if ([ self _hasHDH264Version ]) {
 		src = [ NSString stringWithFormat: @"http://www.youtube.com/get_video?fmt=22&video_id=%@&t=%@",
-						 video_id, video_hash ];
+			   video_id, video_hash ];
 	} else {
 		src = [ NSString stringWithFormat: @"http://www.youtube.com/get_video?fmt=18&video_id=%@&t=%@",
-													video_id, video_hash ];
+			   video_id, video_hash ];
 	}
-    
-    [ element setAttribute: @"src" value: src ];
+	return src;
+}
+
+- (void) _convertElementForMP4: (DOMElement*) element
+{
+	// some tags (OBJECT) want a data attribute, and some want a src attribute
+	// for some reason, though, some cloned elements are not reporting themselves
+	// as OBJECT tags, even though they are; more investigation on this is needed,
+	// but for now, setting both the data and the src attribute corrects the problem
+	// (see bug #294)
+	
+	[ element setAttribute: @"data" value: [ self _h264VersionUrl ]];
+	[ element setAttribute: @"src" value: [ self _h264VersionUrl ]];
+	
     [ element setAttribute: @"type" value: @"video/mp4" ];
     [ element setAttribute: @"scale" value: @"aspect" ];
-    [ element setAttribute: @"autoplay" value: @"true" ];
+    if (_youTubeAutoPlay) {
+		[ element setAttribute: @"autoplay" value: @"true" ];
+	} else {
+		[ element setAttribute: @"autoplay" value: @"false" ];
+	}
     [ element setAttribute: @"cache" value: @"false" ];
-   
+	
     if( ! [ element hasAttribute: @"width" ] )
         [ element setAttribute: @"width" value: @"640" ];
-   
+	
     if( ! [ element hasAttribute: @"height" ] )
-       [ element setAttribute: @"height" value: @"500" ];
-
+		[ element setAttribute: @"height" value: @"500" ];
+	
     [ element setAttribute: @"flashvars" value: nil ];
+}
+
+- (void) _convertElementForVideoElement: (DOMElement*) element
+{
+    [ element setAttribute: @"src" value: [ self _h264VersionUrl ] ];
+	[ element setAttribute: @"autobuffer" value:@"autobuffer"];
+	if (_youTubeAutoPlay) {
+		[ element setAttribute: @"autoplay" value:@"autoplay" ];
+	} else {
+		if ( [element hasAttribute:@"autoplay"] )
+			[ element removeAttribute:@"autoplay" ];
+	}
+	[ element setAttribute: @"controls" value:@"controls"];
+	
+	DOMElement* container = [self container];
+	
+	[ element setAttribute:@"width" value:[ NSString stringWithFormat:@"%dpx", [ container clientWidth ]]];
+	[ element setAttribute:@"height" value:[ NSString stringWithFormat:@"%dpx", [ container clientHeight ]]];
 }
 
 - (void) _convertToMP4Container
@@ -1296,10 +1431,14 @@ didReceiveResponse:(NSHTTPURLResponse *)response
 
 - (void) _convertToMP4ContainerAfterDelay
 {
-    DOMElement* newElement = (DOMElement*) [ [self container] cloneNode: NO ];
-    
-    [ self _convertElementForMP4: newElement ];
-    
+	DOMElement* newElement;
+	if ([ self _isVideoElementAvailable ]) {
+		newElement = [[[self container] ownerDocument] createElement:@"video"];
+		[ self _convertElementForVideoElement: newElement ];
+    } else {
+		newElement = (DOMElement*) [ [self container] cloneNode: NO ];
+		[ self _convertElementForMP4:newElement ];
+	}
     // Just to be safe, since we are about to replace our containing element
     [[self retain] autorelease];
     
@@ -1386,11 +1525,30 @@ didReceiveResponse:(NSHTTPURLResponse *)response
 			   video_id, video_hash ];
 	}
 	
-	NSString *scriptSource = [NSString stringWithFormat:
+	NSString *scriptSource = nil;
+	if (floor(NSAppKitVersionNumber) > NSAppKitVersionNumber10_5) {
+		// Snowy Leopard
+		scriptSource = [NSString stringWithFormat:
+							  @"tell application \"QuickTime Player\"\nactivate\nopen URL \"%@\"\nrepeat while (front document is not presenting)\ndelay 1\npresent front document\nend repeat\nrepeat while (playing of front document is false)\ndelay 1\nplay front document\nend repeat\nend tell",src];
+	} else {
+		scriptSource = [NSString stringWithFormat:
 							  @"tell application \"QuickTime Player\"\nactivate\ngetURL \"%@\"\nrepeat while (display state of front document is not presentation)\ndelay 1\npresent front document scale screen\nend repeat\nrepeat while (playing of front document is false)\ndelay 1\nplay front document\nend repeat\nend tell",src];
+	}
 	NSAppleScript *openInQTPlayerScript = [[NSAppleScript alloc] initWithSource:scriptSource];
 	[openInQTPlayerScript executeAndReturnError:nil];
 	[openInQTPlayerScript release];
+}
+
+- (void)_didRetrieveEmbeddedPlayerFlashVars:(NSDictionary *)flashVars
+{
+	if (flashVars)
+	{
+		_flashVars = [flashVars retain];
+		NSString *videoId = [self flashvarWithName:@"video_id"];
+		[self setVideoId:videoId];
+	}
+	
+	[self _checkForH264VideoVariants];
 }
 
 - (void)_retrieveEmbeddedPlayerFlashVarsAndCheckForVariantsWithVideoId:(NSString *)videoId
@@ -1403,13 +1561,13 @@ didReceiveResponse:(NSHTTPURLResponse *)response
 	NSString *pageSourceString = [NSString stringWithContentsOfURL:YouTubePageURL
 													  usedEncoding:nil
 															 error:&pageSourceError];
-	if (! pageSourceError) {
-		_flashVars = [[self _flashVarDictionaryFromYouTubePageHTML:pageSourceString] retain];
-		_videoId = [self flashvarWithName:@"video_id"];
+	NSDictionary *flashVars = nil;
+	if (pageSourceString && !pageSourceError) {
+		flashVars = [self _flashVarDictionaryFromYouTubePageHTML:pageSourceString];
 	}
 	
-	[self performSelectorOnMainThread:@selector(_checkForH264VideoVariants)
-						   withObject:nil
+	[self performSelectorOnMainThread:@selector(_didRetrieveEmbeddedPlayerFlashVars:)
+						   withObject:flashVars
 						waitUntilDone:NO];
 	
 	[pool drain];
@@ -1526,8 +1684,7 @@ didReceiveResponse:(NSHTTPURLResponse *)response
 }
 - (void)setWebView:(WebView *)newValue
 {
-    [newValue retain];
-    [_webView release];
+    // Not retained, because the WebView owns the plugin, so we'll get a retain cycle.
     _webView = newValue;
 }
 
@@ -1599,7 +1756,7 @@ didReceiveResponse:(NSHTTPURLResponse *)response
 
 - (NSString *)videoId
 {
-    return _videoId;
+    return [[_videoId retain] autorelease];
 }
 - (void)setVideoId:(NSString *)newValue
 {
