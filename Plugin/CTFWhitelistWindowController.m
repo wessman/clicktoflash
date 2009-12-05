@@ -1,7 +1,24 @@
 #import "CTFWhitelistWindowController.h"
+#import "CTFUserDefaultsController.h"
 #import "SparkleManager.h"
 
 NSString *kCTFCheckForUpdates = @"CTFCheckForUpdates";
+
+@interface CTFWhitelistWindowController (private)
+
+- (NSUInteger)getEmptyWhitelistRowIndex;
+
+@end
+
+@implementation CTFWhitelistWindowController (private)
+
+- (NSUInteger)getEmptyWhitelistRowIndex
+{
+	id controllerObjects = [_controller arrangedObjects];
+	return [controllerObjects indexOfObject:[NSDictionary dictionary]];
+}
+
+@end
 
 @implementation CTFWhitelistWindowController
 
@@ -22,6 +39,11 @@ NSString *kCTFCheckForUpdates = @"CTFCheckForUpdates";
 - (void)windowDidLoad
 {
     [_checkNowButton setEnabled:[[SparkleManager sharedManager] canUpdate]];
+	
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(whitelistDidUpdate:) name:@"ClickToFlashPluginDefaultsDidChange" object:nil];
+    
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(tableViewDidChange:) name:@"NSTableViewSelectionDidChangeNotification" object:_whitelistTableView];
+    
 }
 
 - (IBAction)checkForUpdates:(id)sender;
@@ -39,6 +61,44 @@ NSString *kCTFCheckForUpdates = @"CTFCheckForUpdates";
 	NSBundle *CTFBundle = [NSBundle bundleWithIdentifier:@"com.github.rentzsch.clicktoflash"];
 	return [CTFBundle objectForInfoDictionaryKey: @"CFBundleShortVersionString"];
 }
+
+- (void)selectRowAtIndex:(NSNumber *)rowNum
+{
+	[_whitelistTableView selectRowIndexes:[NSIndexSet indexSetWithIndex:[rowNum unsignedIntegerValue]] byExtendingSelection:NO];
+	[_whitelistTableView scrollRowToVisible:[rowNum integerValue]];
+	[_whitelistTableView editColumn:0 row:[rowNum integerValue] withEvent:nil select:YES];
+}
+
+- (void)selectEmptyRow
+{
+	NSUInteger emptyRow = [self getEmptyWhitelistRowIndex];
+	
+	if( emptyRow != NSNotFound )
+	{
+		[self selectRowAtIndex:[NSNumber numberWithUnsignedInteger:emptyRow]];
+	}
+}
+
+#pragma mark Whitelist manipulation
+- (IBAction)addToWhitelist:(id)sender
+{	
+	NSUInteger emptyRow = [self getEmptyWhitelistRowIndex];
+	
+	if( emptyRow == NSNotFound )
+	{
+		[_controller add:sender];
+	}
+	
+	[self performSelector:@selector(selectEmptyRow) withObject:nil afterDelay:0];
+}
+
+- (IBAction)removeFromWhitelist:(id)sender
+{
+    [_controller remove:sender];
+}
+
+
+#pragma mark Uninstallation
 
 - (IBAction)uninstallClickToFlash:(id)sender;
 {
